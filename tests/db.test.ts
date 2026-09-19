@@ -53,6 +53,57 @@ describe("repos", () => {
     expect(() => dbMut.createTask(db, { title: "bad", outcome_id: "nope" })).toThrow();
   });
 
+  test("updateOutcome persists description and target_date (Direction edit form)", () => {
+    const db = mem();
+    const o = dbMut.createOutcome(db, { title: "o", description: "d0", target_date: "2026-12-31" });
+    const u = dbMut.updateOutcome(db, o.id, { description: "how we know", target_date: "2027-01-15" });
+    expect(u.description).toBe("how we know");
+    expect(u.target_date).toBe("2027-01-15");
+    expect(u.revision).toBe(2);
+    const cleared = dbMut.updateOutcome(db, o.id, { target_date: null });
+    expect(cleared.target_date).toBeNull();
+  });
+
+  test("updateBet persists title/assumption/rationale/outcome link; deleteBet removes (Direction edit form)", () => {
+    const db = mem();
+    const o1 = dbMut.createOutcome(db, { title: "o1" });
+    const o2 = dbMut.createOutcome(db, { title: "o2" });
+    const b = dbMut.createBet(db, { title: "b", assumption: "a" });
+    const u = dbMut.updateBet(db, b.id, { title: "b2", assumption: "a2", rationale: "why", outcome_id: o1.id });
+    expect(u.title).toBe("b2");
+    expect(u.assumption).toBe("a2");
+    expect(u.rationale).toBe("why");
+    expect(u.outcome_id).toBe(o1.id);
+    const relinked = dbMut.updateBet(db, b.id, { outcome_id: o2.id });
+    expect(relinked.outcome_id).toBe(o2.id);
+    expect(() => dbMut.updateBet(db, b.id, { outcome_id: "missing" })).toThrow();
+    dbMut.deleteBet(db, b.id);
+    expect(dbGet.bet(db, b.id)).toBeNull();
+    expect(() => dbMut.deleteBet(db, b.id)).toThrow();
+  });
+
+  test("updateTask persists title/deadline/priority/links; deleteTask/deleteSignal remove (Focus edit + Review signal delete)", () => {
+    const db = mem();
+    const o = dbMut.createOutcome(db, { title: "o" });
+    const b = dbMut.createBet(db, { title: "b", outcome_id: o.id });
+    const t = dbMut.createTask(db, { title: "t" });
+    const u = dbMut.updateTask(db, t.id, { title: "t2", deadline: "2026-10-01", priority: "p0", outcome_id: o.id, bet_id: b.id });
+    expect(u.title).toBe("t2");
+    expect(u.deadline).toBe("2026-10-01");
+    expect(u.priority).toBe("p0");
+    expect(u.outcome_id).toBe(o.id);
+    expect(u.bet_id).toBe(b.id);
+    const unlinked = dbMut.updateTask(db, t.id, { outcome_id: null, bet_id: null, deadline: null });
+    expect(unlinked.outcome_id).toBeNull();
+    expect(unlinked.bet_id).toBeNull();
+    expect(unlinked.deadline).toBeNull();
+    const s = dbMut.createSignal(db, { title: "s", occurred_at: new Date().toISOString() });
+    dbMut.deleteSignal(db, s.id);
+    expect(dbGet.signal(db, s.id)).toBeNull();
+    dbMut.deleteTask(db, t.id);
+    expect(dbGet.task(db, t.id)).toBeNull();
+  });
+
   test("input validation rejects bad enum/date/blank", () => {
     const db = mem();
     expect(() => dbMut.createOutcome(db, { title: "" })).toThrow();

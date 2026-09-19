@@ -10,7 +10,7 @@ No auth in the MVP. The server binds `127.0.0.1` by default — **do not expose 
 bun install            # install dependencies (Bun only)
 bun run typecheck      # strict tsc --noEmit
 bun test               # unit tests (in-memory DB + fake adapter outputs; never calls a real agent)
-bun run build          # vite production build into ./dist
+bun run build          # vite production build into ./dist (required before start: start serves dist, not web/)
 bun run start          # serve API + dist UI on http://127.0.0.1:3030
 ```
 

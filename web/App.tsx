@@ -148,7 +148,7 @@ function Direction() {
         <OutcomeForm onDone={() => outcomes.reload()} outcomes={outcomes.data ?? []} />
         <ul className="list">
           {(outcomes.data ?? []).map((o) => (
-            <li key={o.id}>
+            <li key={`${o.id}:${o.revision}`}>
               <OutcomeRow o={o} bets={betsByOutcome.get(o.id) ?? []} onDone={() => { outcomes.reload(); bets.reload(); }} />
             </li>
           ))}
@@ -162,7 +162,7 @@ function Direction() {
         <BetForm outcomes={outcomes.data ?? []} onDone={() => bets.reload()} />
         <ul className="list">
           {(bets.data ?? []).filter((b) => b.outcome_id).map((b) => (
-            <li key={b.id}>
+            <li key={`${b.id}:${b.revision}`}>
               <BetRow b={b} outcomes={outcomes.data ?? []} onDone={() => bets.reload()} />
             </li>
           ))}
@@ -173,7 +173,7 @@ function Direction() {
             <h3>Unlinked bets</h3>
             <ul className="list">
               {(betsByOutcome.get(null) ?? []).map((b) => (
-                <li key={b.id}><BetRow b={b} outcomes={outcomes.data ?? []} onDone={() => bets.reload()} /></li>
+                <li key={`${b.id}:${b.revision}`}><BetRow b={b} outcomes={outcomes.data ?? []} onDone={() => bets.reload()} /></li>
               ))}
             </ul>
           </div>
@@ -212,24 +212,26 @@ function OutcomeForm({ onDone }: { onDone: () => void; outcomes: Outcome[] }) {
 
 function OutcomeRow({ o, bets, onDone }: { o: Outcome; bets: Bet[]; onDone: () => void }) {
   const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [title, setTitle] = useState(o.title);
+  const [desc, setDesc] = useState(o.description);
+  const [target, setTarget] = useState(o.target_date ?? "");
   const [status, setStatus] = useState(o.status);
   const [conf, setConf] = useState(o.confidence);
   const [error, setError] = useState("");
   async function save() {
     setError("");
     try {
-      await api(`/api/outcomes/${o.id}`, { method: "PATCH", body: { title, status, confidence: conf } });
+      await api(`/api/outcomes/${o.id}`, { method: "PATCH", body: { title, description: desc, target_date: target || null, status, confidence: conf } });
       setEditing(false); onDone();
     } catch (e) { setError(e instanceof Error ? e.message : "save failed"); }
   }
   async function del() {
-    if (!confirm("Archive instead of delete where possible. Delete this outcome?")) return;
     setError("");
     try {
       await api(`/api/outcomes/${o.id}`, { method: "DELETE" });
       onDone();
-    } catch (e) { setError(e instanceof Error ? e.message : "delete failed"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "delete failed"); setConfirming(false); }
   }
   if (!editing) {
     return (
@@ -238,7 +240,15 @@ function OutcomeRow({ o, bets, onDone }: { o: Outcome; bets: Bet[]; onDone: () =
         {o.target_date && <span className="pill">target {o.target_date}</span>}
         <div className="small muted">{o.description || "No description."} Linked bets: {bets.length}. Revision {o.revision}.</div>
         <Err msg={error} />
-        <div className="actions"><button onClick={() => setEditing(true)}>Edit</button><button className="danger" onClick={del}>Delete</button></div>
+        {confirming ? (
+          <div className="actions">
+            <span className="small">Delete this outcome? Bets stay, unlinked.</span>
+            <button className="danger" autoFocus onClick={del}>Confirm delete</button>
+            <button onClick={() => setConfirming(false)}>Keep</button>
+          </div>
+        ) : (
+          <div className="actions"><button onClick={() => setEditing(true)}>Edit</button><button className="danger" onClick={() => setConfirming(true)}>Delete</button></div>
+        )}
       </div>
     );
   }
@@ -246,7 +256,9 @@ function OutcomeRow({ o, bets, onDone }: { o: Outcome; bets: Bet[]; onDone: () =
     <form onSubmit={(e) => { e.preventDefault(); save(); }}>
       <Err msg={error} />
       <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+      <label>Description<input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="How will you know?" /></label>
       <div className="row">
+        <div><label>Target date<input type="date" value={target} onChange={(e) => setTarget(e.target.value)} /></label></div>
         <div><label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">active</option><option value="done">done</option><option value="archived">archived</option></select></label></div>
         <div><label>Confidence<select value={conf} onChange={(e) => setConf(e.target.value)}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label></div>
       </div>
@@ -286,6 +298,11 @@ function BetForm({ outcomes, onDone }: { outcomes: Outcome[]; onDone: () => void
 
 function BetRow({ b, outcomes, onDone }: { b: Bet; outcomes: Outcome[]; onDone: () => void }) {
   const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [title, setTitle] = useState(b.title);
+  const [assumption, setAssumption] = useState(b.assumption);
+  const [rationale, setRationale] = useState(b.rationale);
+  const [outcomeId, setOutcomeId] = useState(b.outcome_id ?? "");
   const [status, setStatus] = useState(b.status);
   const [conf, setConf] = useState(b.confidence);
   const [review, setReview] = useState(b.review_date ?? "");
@@ -294,9 +311,16 @@ function BetRow({ b, outcomes, onDone }: { b: Bet; outcomes: Outcome[]; onDone: 
   async function save() {
     setError("");
     try {
-      await api(`/api/bets/${b.id}`, { method: "PATCH", body: { status, confidence: conf, review_date: review || null } });
+      await api(`/api/bets/${b.id}`, { method: "PATCH", body: { title, assumption, rationale, outcome_id: outcomeId || null, status, confidence: conf, review_date: review || null } });
       setEditing(false); onDone();
     } catch (e) { setError(e instanceof Error ? e.message : "save failed"); }
+  }
+  async function del() {
+    setError("");
+    try {
+      await api(`/api/bets/${b.id}`, { method: "DELETE" });
+      onDone();
+    } catch (e) { setError(e instanceof Error ? e.message : "delete failed"); setConfirming(false); }
   }
   if (!editing) {
     return (
@@ -304,14 +328,28 @@ function BetRow({ b, outcomes, onDone }: { b: Bet; outcomes: Outcome[]; onDone: 
         <strong>{b.title}</strong> <span className="pill">{b.status}</span><span className="pill">{b.confidence}</span>
         {b.review_date && <span className="pill">review {b.review_date}</span>}
         <div className="small muted">Assumes: {b.assumption || "—"} {oc ? `Linked: ${oc.title}.` : "Unlinked."} Revision {b.revision}.</div>
-        <div className="actions"><button onClick={() => setEditing(true)}>Edit</button></div>
+        {b.rationale && <div className="small muted">Rationale: {b.rationale}</div>}
+        <Err msg={error} />
+        {confirming ? (
+          <div className="actions">
+            <span className="small">Delete this bet?</span>
+            <button className="danger" autoFocus onClick={del}>Confirm delete</button>
+            <button onClick={() => setConfirming(false)}>Keep</button>
+          </div>
+        ) : (
+          <div className="actions"><button onClick={() => setEditing(true)}>Edit</button><button className="danger" onClick={() => setConfirming(true)}>Delete</button></div>
+        )}
       </div>
     );
   }
   return (
     <form onSubmit={(e) => { e.preventDefault(); save(); }}>
       <Err msg={error} />
+      <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+      <label>Assumption<input value={assumption} onChange={(e) => setAssumption(e.target.value)} placeholder="What must be true?" /></label>
+      <label>Rationale<input value={rationale} onChange={(e) => setRationale(e.target.value)} placeholder="Why is this bet worth taking?" /></label>
       <div className="row">
+        <div><label>Linked outcome<select value={outcomeId} onChange={(e) => setOutcomeId(e.target.value)}><option value="">None</option>{outcomes.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</select></label></div>
         <div><label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="open">open</option><option value="supported">supported</option><option value="refuted">refuted</option><option value="archived">archived</option></select></label></div>
         <div><label>Confidence<select value={conf} onChange={(e) => setConf(e.target.value)}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label></div>
         <div><label>Review date<input type="date" value={review} onChange={(e) => setReview(e.target.value)} /></label></div>
@@ -322,6 +360,86 @@ function BetRow({ b, outcomes, onDone }: { b: Bet; outcomes: Outcome[]; onDone: 
 }
 
 /* ---------------- Focus ---------------- */
+function TaskRow({ t, today, outcomeName, betName, outcomes, bets, onPatch, onDelete }: {
+  t: Task; today: string;
+  outcomeName: (id: string | null) => string | undefined;
+  betName: (id: string | null) => string | undefined;
+  outcomes: Outcome[]; bets: Bet[];
+  onPatch: (t: Task, patch: Record<string, unknown>) => Promise<boolean>;
+  onDelete: (t: Task) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [title, setTitle] = useState(t.title);
+  const [deadline, setDeadline] = useState(t.deadline ?? "");
+  const [priority, setPriority] = useState(t.priority);
+  const [outcomeId, setOutcomeId] = useState(t.outcome_id ?? "");
+  const [betId, setBetId] = useState(t.bet_id ?? "");
+  const linkedOutcome = outcomeName(t.outcome_id);
+  const linkedBet = betName(t.bet_id);
+  const isOverdue = !!t.deadline && t.deadline < today;
+  // Keep the currently-linked entity visible even when it is no longer
+  // active/open: otherwise the select renders blank while submit still
+  // sends the held id (display bug).
+  const outcomeOptions = outcomes.filter((o) => o.status === "active" || o.id === t.outcome_id || o.id === outcomeId);
+  const betOptions = bets.filter((b) => b.status === "open" || b.id === t.bet_id || b.id === betId);
+  async function saveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    // Close only on success so a rejected edit keeps typed values + retry path.
+    const ok = await onPatch(t, { title, deadline: deadline || null, priority, outcome_id: outcomeId || null, bet_id: betId || null });
+    if (ok) setEditing(false);
+  }
+  if (editing) {
+    return (
+      <li className="action-item">
+        <form onSubmit={saveEdit}>
+          <label>Action<input value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+          <div className="row">
+            <div><label>Deadline<input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label></div>
+            <div><label>Priority<select value={priority} onChange={(e) => setPriority(e.target.value)}><option value="p0">P0 · critical</option><option value="p1">P1 · important</option><option value="p2">P2 · normal</option><option value="p3">P3 · later</option></select></label></div>
+          </div>
+          <div className="row">
+            <div><label>Outcome<select value={outcomeId} onChange={(e) => setOutcomeId(e.target.value)}><option value="">Unlinked</option>{outcomeOptions.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</select></label></div>
+            <div><label>Bet<select value={betId} onChange={(e) => setBetId(e.target.value)}><option value="">None</option>{betOptions.map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}</select></label></div>
+          </div>
+          <div className="actions"><button className="primary" type="submit">Save</button><button type="button" onClick={() => setEditing(false)}>Cancel</button></div>
+        </form>
+      </li>
+    );
+  }
+  return (
+    <li className="action-item">
+      <button className="complete-button" aria-label={`Mark ${t.title} done`} title="Mark done" onClick={() => onPatch(t, { status: "done" })}>
+        <span aria-hidden="true" />
+      </button>
+      <div className="action-body">
+        <div className="action-title-line">
+          <strong>{t.title}</strong>
+          <span className={`priority priority-${t.priority}`}>{t.priority}</span>
+        </div>
+        <div className="action-context">
+          <span className={linkedOutcome ? "outcome-link" : "outcome-link unlinked"}>{linkedOutcome ?? "No outcome — possible drift"}</span>
+          {linkedBet && <span>via {linkedBet}</span>}
+        </div>
+      </div>
+      <div className="action-state">
+        <span className={isOverdue ? "date-chip is-danger" : "date-chip"}>{t.deadline ? (isOverdue ? `Overdue · ${t.deadline}` : `Due ${t.deadline}`) : "No date"}</span>
+        <div className="inline-actions">
+          {t.status === "open" && <button onClick={() => onPatch(t, { status: "doing" })}>Start</button>}
+          {t.status === "doing" && <button onClick={() => onPatch(t, { status: "open" })}>Pause</button>}
+          <button onClick={() => onPatch(t, { blocked: t.blocked ? 0 : 1 })}>{t.blocked ? "Unblock" : "Block"}</button>
+          <button onClick={() => setEditing(true)}>Edit</button>
+          {confirming ? (
+            <><button className="danger" autoFocus onClick={() => onDelete(t)}>Confirm</button><button onClick={() => setConfirming(false)}>Keep</button></>
+          ) : (
+            <button className="danger" onClick={() => setConfirming(true)}>Delete</button>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function Focus() {
   const now = useLoad<NowView>("/api/now");
   const outcomes = useLoad<Outcome[]>("/api/outcomes");
@@ -383,49 +501,30 @@ function Focus() {
     }
   }
 
-  async function updateTask(t: Task, patch: Record<string, unknown>) {
+  async function updateTask(t: Task, patch: Record<string, unknown>): Promise<boolean> {
     setActionError("");
     try {
       await api(`/api/tasks/${t.id}`, { method: "PATCH", body: patch });
       reloadWork();
+      return true;
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Update failed");
+      return false;
+    }
+  }
+
+  async function deleteTask(t: Task) {
+    setActionError("");
+    try {
+      await api(`/api/tasks/${t.id}`, { method: "DELETE" });
+      reloadWork();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Delete failed");
     }
   }
 
   const outcomeName = (id: string | null) => (outcomes.data ?? []).find((o) => o.id === id)?.title;
   const betName = (id: string | null) => (bets.data ?? []).find((b) => b.id === id)?.title;
-
-  const renderTask = (t: Task) => {
-    const linkedOutcome = outcomeName(t.outcome_id);
-    const linkedBet = betName(t.bet_id);
-    const isOverdue = !!t.deadline && t.deadline < today;
-    return (
-      <li className="action-item" key={t.id}>
-        <button className="complete-button" aria-label={`Mark ${t.title} done`} title="Mark done" onClick={() => updateTask(t, { status: "done" })}>
-          <span aria-hidden="true" />
-        </button>
-        <div className="action-body">
-          <div className="action-title-line">
-            <strong>{t.title}</strong>
-            <span className={`priority priority-${t.priority}`}>{t.priority}</span>
-          </div>
-          <div className="action-context">
-            <span className={linkedOutcome ? "outcome-link" : "outcome-link unlinked"}>{linkedOutcome ?? "No outcome — possible drift"}</span>
-            {linkedBet && <span>via {linkedBet}</span>}
-          </div>
-        </div>
-        <div className="action-state">
-          <span className={isOverdue ? "date-chip is-danger" : "date-chip"}>{t.deadline ? (isOverdue ? `Overdue · ${t.deadline}` : `Due ${t.deadline}`) : "No date"}</span>
-          <div className="inline-actions">
-            {t.status === "open" && <button onClick={() => updateTask(t, { status: "doing" })}>Start</button>}
-            {t.status === "doing" && <button onClick={() => updateTask(t, { status: "open" })}>Pause</button>}
-            <button onClick={() => updateTask(t, { blocked: t.blocked ? 0 : 1 })}>{t.blocked ? "Unblock" : "Block"}</button>
-          </div>
-        </div>
-      </li>
-    );
-  };
 
   if (now.loading && outcomes.loading && allTasks.loading) {
     return <div className="loading-state">Building your current picture…</div>;
@@ -458,7 +557,8 @@ function Focus() {
         </details>
       </section>
 
-      <Err msg={now.error || outcomes.error || bets.error || allTasks.error || signals.error || proposals.error || actionError} />
+      <Err msg={now.error || outcomes.error || bets.error || allTasks.error || signals.error || proposals.error} />
+      <Err msg={actionError} />
 
       <section className="pulse-grid" aria-label="Current state">
         <div className="pulse-card"><span>Active outcomes</span><strong>{activeOutcomes.length}</strong><small>{activeOutcomes.filter((o) => o.confidence === "high").length} high confidence</small></div>
@@ -476,7 +576,12 @@ function Focus() {
             </div>
             <p className="panel-description">Ordered by reality: overdue, deadline, then priority.</p>
             <ul className="action-list">
-              {(now.data?.ordered ?? []).slice(0, 8).map(renderTask)}
+              {(now.data?.ordered ?? []).slice(0, 8).map((t) => (
+                <TaskRow key={`${t.id}:${t.revision}`} t={t} today={today}
+                  outcomeName={outcomeName} betName={betName}
+                  outcomes={outcomes.data ?? []} bets={bets.data ?? []}
+                  onPatch={updateTask} onDelete={deleteTask} />
+              ))}
               {(now.data?.ordered.length ?? 0) === 0 && <li className="empty-state"><strong>No active actions.</strong><span>Capture one and connect it to the outcome it advances.</span></li>}
             </ul>
             {(now.data?.ordered.length ?? 0) > 8 && <p className="list-footnote">Showing the first 8 of {now.data?.ordered.length}. Resolve the top before pulling more in.</p>}
@@ -635,6 +740,7 @@ function Review() {
   const [jobMsg, setJobMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [signalDeleteId, setSignalDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     api<Adapter[]>("/api/adapters").then((a) => {
@@ -652,6 +758,14 @@ function Review() {
       await api("/api/signals", { method: "POST", body: { title, kind, evidence, outcome_id: outcomeId || null, bet_id: betId || null, occurred_at: new Date().toISOString() } });
       setTitle(""); setEvidence(""); signals.reload();
     } catch (e) { setError(e instanceof Error ? e.message : "failed"); }
+  }
+
+  async function deleteSignal(id: string) {
+    setError("");
+    try {
+      await api(`/api/signals/${id}`, { method: "DELETE" });
+      setSignalDeleteId(null); signals.reload();
+    } catch (e) { setError(e instanceof Error ? e.message : "delete failed"); setSignalDeleteId(null); }
   }
 
   async function runAgent(e: React.FormEvent) {
@@ -677,7 +791,12 @@ function Review() {
   }
 
   function onDecided(msg: string) {
-    setJobMsg(msg); proposals.reload(); decisions.reload();
+    // An accepted proposal mutates vision/outcomes/bets/tasks, so every
+    // entity list in this view must refresh — not just proposals/decisions.
+    // (Focus/Direction remount with fresh data when navigated to.)
+    setJobMsg(msg);
+    proposals.reload(); decisions.reload();
+    outcomes.reload(); bets.reload(); signals.reload();
   }
 
   const pending = (proposals.data ?? []).filter((p) => p.status === "pending");
@@ -706,7 +825,17 @@ function Review() {
         <h3>Recent signals</h3>
         <ul className="list">
           {(signals.data ?? []).slice(0, 10).map((s) => (
-            <li key={s.id}><strong>{s.title}</strong> <span className="pill">{s.kind}</span><div className="small muted">{s.evidence || "No evidence recorded."}</div></li>
+            <li key={s.id}><strong>{s.title}</strong> <span className="pill">{s.kind}</span><div className="small muted">{s.evidence || "No evidence recorded."}</div>
+              {signalDeleteId === s.id ? (
+                <div className="actions">
+                  <span className="small">Delete this signal?</span>
+                  <button className="danger" autoFocus onClick={() => deleteSignal(s.id)}>Confirm delete</button>
+                  <button onClick={() => setSignalDeleteId(null)}>Keep</button>
+                </div>
+              ) : (
+                <div className="actions"><button className="danger" onClick={() => setSignalDeleteId(s.id)}>Delete</button></div>
+              )}
+            </li>
           ))}
           {!signals.loading && (signals.data ?? []).length === 0 && <li className="muted">No signals yet.</li>}
           {(signals.data ?? []).length > 10 && <li className="small muted">Showing 10 of {signals.data?.length}.</li>}
@@ -775,15 +904,23 @@ function Agents() {
   const [adapters, setAdapters] = useState<Adapter[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [error, setError] = useState("");
-  useEffect(() => {
-    api<Adapter[]>("/api/adapters").then(setAdapters).catch((e: Error) => setError(e.message));
-    api<Run[]>("/api/runs").then(setRuns).catch(() => undefined);
-  }, []);
+  const [refreshing, setRefreshing] = useState(false);
+  function reload() {
+    // Manual refresh only: no polling or timers, per the one-shot-jobs model.
+    setRefreshing(true);
+    setError("");
+    Promise.all([
+      api<Adapter[]>("/api/adapters").then(setAdapters, (e: Error) => { setError(e.message); }),
+      api<Run[]>("/api/runs").then(setRuns, () => undefined),
+    ]).finally(() => setRefreshing(false));
+  }
+  useEffect(() => { reload(); }, []);
   return (
     <div>
       <section className="card" aria-labelledby="ag-h">
         <h2 id="ag-h">Agents and runs</h2>
         <p className="muted">Adapters are detected locally. Configure via NERVE_* environment variables (see README). Agents never run on their own.</p>
+        <div className="actions"><button onClick={reload} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh"}</button></div>
         <Err msg={error} />
         <ul className="list">
           {adapters.map((a) => (
