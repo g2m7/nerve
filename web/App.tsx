@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api.ts";
 
-type View = "direction" | "now" | "review" | "agents";
+type View = "focus" | "direction" | "review" | "agents";
 
 interface Vision { text: string; revision: number; updated_at: string; history?: { text: string; revision: number; created_at: string }[]; }
 interface Outcome { id: string; title: string; description: string; status: string; confidence: string; target_date: string | null; revision: number; }
@@ -14,26 +14,51 @@ interface Adapter { id: string; bin: string; model: string; available: boolean; 
 interface Run { id: string; adapter: string; job_type: string; status: string; est_tokens: number; reported_tokens: number | null; error: string; started_at: string; }
 interface NowView { overdue: Task[]; dueNext: Task[]; ordered: Task[]; blocked: Task[]; }
 
+const VIEW_META: Record<View, { label: string; eyebrow: string }> = {
+  focus: { label: "Focus", eyebrow: "Command center" },
+  direction: { label: "Direction", eyebrow: "Vision and outcomes" },
+  review: { label: "Review", eyebrow: "Signals and decisions" },
+  agents: { label: "System", eyebrow: "Agents and runs" },
+};
+
 export default function App() {
-  const [view, setView] = useState<View>("direction");
+  const [view, setView] = useState<View>("focus");
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">Nerve<small>Solo-founder vision to execution</small></div>
+    <div className="app-shell">
+      <aside className="rail">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">N</span>
+          <span>Nerve<small>Founder control room</small></span>
+        </div>
         <nav className="tabs" aria-label="Main views">
-          {(["direction", "now", "review", "agents"] as View[]).map((v) => (
+          {(["focus", "direction", "review", "agents"] as View[]).map((v, index) => (
             <button key={v} aria-current={view === v ? "page" : undefined} onClick={() => setView(v)}>
-              {v === "direction" ? "Direction" : v === "now" ? "Now" : v === "review" ? "Review" : "Agents"}
+              <span className="nav-index" aria-hidden="true">0{index + 1}</span>
+              <span>{VIEW_META[v].label}</span>
             </button>
           ))}
         </nav>
-      </header>
-      <main>
-        {view === "direction" && <Direction />}
-        {view === "now" && <Now />}
-        {view === "review" && <Review />}
-        {view === "agents" && <Agents />}
-      </main>
+        <div className="rail-note">
+          <span className="status-light" aria-hidden="true" />
+          Local and founder-controlled
+          <small>Nothing changes without your approval.</small>
+        </div>
+      </aside>
+      <div className="workspace">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">{VIEW_META[view].eyebrow}</p>
+            <p className="view-title">{VIEW_META[view].label}</p>
+          </div>
+          <p className="today-label">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "short", day: "numeric" }).format(new Date())}</p>
+        </header>
+        <main>
+          {view === "focus" && <Focus />}
+          {view === "direction" && <Direction />}
+          {view === "review" && <Review />}
+          {view === "agents" && <Agents />}
+        </main>
+      </div>
     </div>
   );
 }
@@ -296,12 +321,14 @@ function BetRow({ b, outcomes, onDone }: { b: Bet; outcomes: Outcome[]; onDone: 
   );
 }
 
-/* ---------------- Now ---------------- */
-function Now() {
+/* ---------------- Focus ---------------- */
+function Focus() {
   const now = useLoad<NowView>("/api/now");
   const outcomes = useLoad<Outcome[]>("/api/outcomes");
   const bets = useLoad<Bet[]>("/api/bets");
   const allTasks = useLoad<Task[]>("/api/tasks");
+  const signals = useLoad<Signal[]>("/api/signals");
+  const proposals = useLoad<Proposal[]>("/api/proposals");
   const [title, setTitle] = useState("");
   const [deadline, setDeadline] = useState("");
   const [priority, setPriority] = useState("p2");
@@ -310,118 +337,228 @@ function Now() {
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
 
+  const today = useMemo(() => {
+    const d = new Date();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${month}-${day}`;
+  }, []);
+  const horizon = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${month}-${day}`;
+  }, []);
+
+  const activeOutcomes = (outcomes.data ?? []).filter((o) => o.status === "active");
+  const activeTasks = (allTasks.data ?? []).filter((t) => t.status === "open" || t.status === "doing");
+  const reviewDueBets = (bets.data ?? []).filter((b) => b.status === "open" && !!b.review_date && b.review_date <= today);
+  const refutedBets = (bets.data ?? []).filter((b) => b.status === "refuted");
+  const atRiskOutcomes = activeOutcomes.filter((o) => o.confidence === "low" || (!!o.target_date && o.target_date < today));
+  const unlinkedTasks = activeTasks.filter((t) => !t.outcome_id);
+  const pendingProposals = (proposals.data ?? []).filter((p) => p.status === "pending");
+  const upcomingTasks = (now.data?.dueNext ?? []).filter((t) => !!t.deadline && t.deadline <= horizon).slice(0, 5);
+  const upcomingOutcomes = activeOutcomes.filter((o) => !!o.target_date && o.target_date >= today && o.target_date <= horizon);
+  const upcomingReviews = (bets.data ?? []).filter((b) => b.status === "open" && !!b.review_date && b.review_date > today && b.review_date <= horizon);
+  const driftCount = (now.data?.overdue.length ?? 0) + (now.data?.blocked.length ?? 0) + reviewDueBets.length + refutedBets.length + atRiskOutcomes.length + unlinkedTasks.length;
+
+  function reloadWork() {
+    now.reload();
+    allTasks.reload();
+  }
+
   async function quickCapture(e: React.FormEvent) {
-    e.preventDefault(); setError("");
+    e.preventDefault();
+    setError("");
     try {
       await api("/api/tasks", { method: "POST", body: { title, deadline: deadline || null, priority, outcome_id: outcomeId || null, bet_id: betId || null } });
-      setTitle(""); setDeadline(""); onReload();
-    } catch (e) { setError(e instanceof Error ? e.message : "failed"); }
-  }
-  function onReload() { now.reload(); allTasks.reload(); }
-
-  async function setStatus(t: Task, status: string) {
-    setActionError("");
-    try {
-      await api(`/api/tasks/${t.id}`, { method: "PATCH", body: { status } });
-      onReload();
-    } catch (e) { setActionError(e instanceof Error ? e.message : "update failed"); }
-  }
-  async function toggleBlocked(t: Task) {
-    setActionError("");
-    try {
-      await api(`/api/tasks/${t.id}`, { method: "PATCH", body: { blocked: t.blocked ? 0 : 1 } });
-      onReload();
-    } catch (e) { setActionError(e instanceof Error ? e.message : "update failed"); }
+      setTitle("");
+      setDeadline("");
+      setOutcomeId("");
+      setBetId("");
+      reloadWork();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Capture failed");
+    }
   }
 
-  const name = (t: Task) => {
-    const o = (outcomes.data ?? []).find((x) => x.id === t.outcome_id);
-    const b = (bets.data ?? []).find((x) => x.id === t.bet_id);
-    return [o?.title, b?.title].filter(Boolean).join(" / ");
+  async function updateTask(t: Task, patch: Record<string, unknown>) {
+    setActionError("");
+    try {
+      await api(`/api/tasks/${t.id}`, { method: "PATCH", body: patch });
+      reloadWork();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Update failed");
+    }
+  }
+
+  const outcomeName = (id: string | null) => (outcomes.data ?? []).find((o) => o.id === id)?.title;
+  const betName = (id: string | null) => (bets.data ?? []).find((b) => b.id === id)?.title;
+
+  const renderTask = (t: Task) => {
+    const linkedOutcome = outcomeName(t.outcome_id);
+    const linkedBet = betName(t.bet_id);
+    const isOverdue = !!t.deadline && t.deadline < today;
+    return (
+      <li className="action-item" key={t.id}>
+        <button className="complete-button" aria-label={`Mark ${t.title} done`} title="Mark done" onClick={() => updateTask(t, { status: "done" })}>
+          <span aria-hidden="true" />
+        </button>
+        <div className="action-body">
+          <div className="action-title-line">
+            <strong>{t.title}</strong>
+            <span className={`priority priority-${t.priority}`}>{t.priority}</span>
+          </div>
+          <div className="action-context">
+            <span className={linkedOutcome ? "outcome-link" : "outcome-link unlinked"}>{linkedOutcome ?? "No outcome — possible drift"}</span>
+            {linkedBet && <span>via {linkedBet}</span>}
+          </div>
+        </div>
+        <div className="action-state">
+          <span className={isOverdue ? "date-chip is-danger" : "date-chip"}>{t.deadline ? (isOverdue ? `Overdue · ${t.deadline}` : `Due ${t.deadline}`) : "No date"}</span>
+          <div className="inline-actions">
+            {t.status === "open" && <button onClick={() => updateTask(t, { status: "doing" })}>Start</button>}
+            {t.status === "doing" && <button onClick={() => updateTask(t, { status: "open" })}>Pause</button>}
+            <button onClick={() => updateTask(t, { blocked: t.blocked ? 0 : 1 })}>{t.blocked ? "Unblock" : "Block"}</button>
+          </div>
+        </div>
+      </li>
+    );
   };
 
-  const taskRow = (t: Task, overdue: boolean) => (
-    <li key={t.id}>
-      <strong>{t.title}</strong>{" "}
-      <span className={`pill${overdue ? " overdue" : ""}`}>{t.deadline ? (overdue ? `overdue ${t.deadline}` : `due ${t.deadline}`) : "no date"}</span>
-      <span className="pill">{t.priority}</span>
-      <span className="pill">{t.status}</span>
-      {t.blocked ? <span className="pill blocked">blocked</span> : null}
-      {name(t) && <div className="small muted">Linked: {name(t)}</div>}
-      <div className="actions">
-        {t.status !== "done" && <button onClick={() => setStatus(t, "done")}>Done</button>}
-        {t.status === "open" && <button onClick={() => setStatus(t, "doing")}>Start</button>}
-        {t.status === "doing" && <button onClick={() => setStatus(t, "open")}>Pause</button>}
-        <button onClick={() => toggleBlocked(t)}>{t.blocked ? "Unblock" : "Block"}</button>
-      </div>
-    </li>
-  );
+  if (now.loading && outcomes.loading && allTasks.loading) {
+    return <div className="loading-state">Building your current picture…</div>;
+  }
 
-  // Local date (matches the server's todayKey); UTC would disagree for hours each day west of UTC.
-  const today = (() => {
-    const d = new Date();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${d.getFullYear()}-${m}-${day}`;
-  })();
-  const doneTasks = (allTasks.data ?? []).filter((t) => t.status === "done" || t.status === "dropped").slice(0, 10);
   return (
-    <div>
-      <section className="card" aria-labelledby="capture-h">
-        <h2 id="capture-h">Quick capture</h2>
-        <Err msg={error} />
-        <form onSubmit={quickCapture}>
-          <label htmlFor="task-title">Task title</label>
-          <input id="task-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Next concrete action" />
-          <div className="row">
-            <div><label htmlFor="task-due">Deadline<input id="task-due" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label></div>
-            <div><label htmlFor="task-pri">Priority<select id="task-pri" value={priority} onChange={(e) => setPriority(e.target.value)}><option value="p0">p0</option><option value="p1">p1</option><option value="p2">p2</option><option value="p3">p3</option></select></label></div>
-          </div>
-          <div className="row">
-            <div><label htmlFor="task-oc">Outcome<select id="task-oc" value={outcomeId} onChange={(e) => setOutcomeId(e.target.value)}><option value="">None</option>{(outcomes.data ?? []).map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</select></label></div>
-            <div><label htmlFor="task-bet">Bet<select id="task-bet" value={betId} onChange={(e) => setBetId(e.target.value)}><option value="">None</option>{(bets.data ?? []).map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}</select></label></div>
-          </div>
-          <div className="actions"><button className="primary" type="submit">Capture task</button></div>
-        </form>
+    <div className="focus-page">
+      <section className="page-intro">
+        <div>
+          <p className="eyebrow">Your operating picture</p>
+          <h1>Know what matters next.</h1>
+          <p>Actions are anchored to outcomes. Drift, blockers, and approaching pressure stay visible.</p>
+        </div>
+        <details className="capture-panel">
+          <summary>Capture an action</summary>
+          <form onSubmit={quickCapture}>
+            <Err msg={error} />
+            <label htmlFor="focus-task-title">Next concrete action</label>
+            <input id="focus-task-title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What needs to move?" />
+            <div className="row">
+              <div><label htmlFor="focus-task-outcome">Outcome<select id="focus-task-outcome" value={outcomeId} onChange={(e) => setOutcomeId(e.target.value)}><option value="">Unlinked</option>{activeOutcomes.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</select></label></div>
+              <div><label htmlFor="focus-task-bet">Bet<select id="focus-task-bet" value={betId} onChange={(e) => setBetId(e.target.value)}><option value="">None</option>{(bets.data ?? []).filter((b) => b.status === "open").map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}</select></label></div>
+            </div>
+            <div className="row">
+              <div><label htmlFor="focus-task-due">Deadline<input id="focus-task-due" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label></div>
+              <div><label htmlFor="focus-task-priority">Priority<select id="focus-task-priority" value={priority} onChange={(e) => setPriority(e.target.value)}><option value="p0">P0 · critical</option><option value="p1">P1 · important</option><option value="p2">P2 · normal</option><option value="p3">P3 · later</option></select></label></div>
+            </div>
+            <div className="actions"><button className="primary" type="submit">Add action</button></div>
+          </form>
+        </details>
       </section>
-      <section className="card" aria-labelledby="now-h">
-        <h2 id="now-h">Top priorities</h2>
-        <p className="small muted">Order: overdue first, then soonest deadline, then priority (p0 first). Blocked tasks sit apart. Today is {today}.</p>
-        <Err msg={now.error} />
-        <Err msg={actionError} />
-        {now.loading ? <p className="muted">Loading…</p> : (
-          <div>
-            <h3>Due or overdue ({(now.data?.overdue.length ?? 0) + (now.data?.dueNext.length ?? 0)})</h3>
-            <ul className="list">
-              {(now.data?.overdue ?? []).map((t) => taskRow(t, true))}
-              {(now.data?.dueNext ?? []).slice(0, 10).map((t) => taskRow(t, false))}
-              {(now.data?.overdue.length ?? 0) === 0 && (now.data?.dueNext.length ?? 0) === 0 && <li className="muted">Nothing due. Pick the next task below.</li>}
-              {(now.data?.dueNext.length ?? 0) > 10 && <li className="small muted">Showing 10 of {now.data?.dueNext.length} upcoming.</li>}
-            </ul>
-            <h3>Next up</h3>
-            <ul className="list">
-              {(now.data?.ordered ?? []).filter((t) => !t.deadline).slice(0, 10).map((t) => taskRow(t, false))}
-              {(now.data?.ordered ?? []).filter((t) => !t.deadline).length === 0 && <li className="muted">No undated tasks. Capture the next action above.</li>}
-            </ul>
-            <h3>Blocked ({now.data?.blocked.length ?? 0})</h3>
-            <ul className="list">
-              {(now.data?.blocked ?? []).map((t) => taskRow(t, !!t.deadline && t.deadline < today))}
-              {(now.data?.blocked.length ?? 0) === 0 && <li className="muted">Nothing blocked.</li>}
-            </ul>
-            <details>
-              <summary>Recently done ({doneTasks.length})</summary>
-              <ul className="list">
-                {doneTasks.map((t) => (
-                  <li key={t.id}><strong>{t.title}</strong> <span className="pill">{t.status}</span>
-                    <div className="actions"><button onClick={() => setStatus(t, "open")}>Reopen</button></div>
-                  </li>
-                ))}
-                {doneTasks.length === 0 && <li className="muted">Nothing done yet.</li>}
-              </ul>
-            </details>
-          </div>
-        )}
+
+      <Err msg={now.error || outcomes.error || bets.error || allTasks.error || signals.error || proposals.error || actionError} />
+
+      <section className="pulse-grid" aria-label="Current state">
+        <div className="pulse-card"><span>Active outcomes</span><strong>{activeOutcomes.length}</strong><small>{activeOutcomes.filter((o) => o.confidence === "high").length} high confidence</small></div>
+        <div className="pulse-card"><span>Actions in motion</span><strong>{activeTasks.filter((t) => t.status === "doing").length}</strong><small>{activeTasks.length} open in total</small></div>
+        <div className={`pulse-card ${driftCount ? "pulse-alert" : "pulse-clear"}`}><span>Signals of drift</span><strong>{driftCount}</strong><small>{driftCount ? "Needs a decision" : "Operating cleanly"}</small></div>
+        <div className={`pulse-card ${pendingProposals.length ? "pulse-waiting" : ""}`}><span>Decisions waiting</span><strong>{pendingProposals.length}</strong><small>{pendingProposals.length ? "Proposals need review" : "Nothing queued"}</small></div>
       </section>
+
+      <div className="command-grid">
+        <div className="command-main">
+          <section className="panel next-actions" aria-labelledby="next-actions-h">
+            <div className="panel-heading">
+              <div><p className="eyebrow">Execution</p><h2 id="next-actions-h">Next actions</h2></div>
+              <span className="panel-count">{now.data?.ordered.length ?? 0} active</span>
+            </div>
+            <p className="panel-description">Ordered by reality: overdue, deadline, then priority.</p>
+            <ul className="action-list">
+              {(now.data?.ordered ?? []).slice(0, 8).map(renderTask)}
+              {(now.data?.ordered.length ?? 0) === 0 && <li className="empty-state"><strong>No active actions.</strong><span>Capture one and connect it to the outcome it advances.</span></li>}
+            </ul>
+            {(now.data?.ordered.length ?? 0) > 8 && <p className="list-footnote">Showing the first 8 of {now.data?.ordered.length}. Resolve the top before pulling more in.</p>}
+          </section>
+
+          <section className="panel outcome-map" aria-labelledby="outcome-map-h">
+            <div className="panel-heading">
+              <div><p className="eyebrow">Direction</p><h2 id="outcome-map-h">Outcome map</h2></div>
+              <span className="panel-count">{activeOutcomes.length} active</span>
+            </div>
+            <p className="panel-description">Each outcome shows the bets behind it, its execution load, and where it is slipping.</p>
+            <div className="outcome-list">
+              {activeOutcomes.map((o) => {
+                const outcomeTasks = (allTasks.data ?? []).filter((t) => t.outcome_id === o.id);
+                const openTasks = outcomeTasks.filter((t) => t.status === "open" || t.status === "doing");
+                const doneTasks = outcomeTasks.filter((t) => t.status === "done");
+                const outcomeBets = (bets.data ?? []).filter((b) => b.outcome_id === o.id && b.status !== "archived");
+                const slipped = openTasks.filter((t) => !!t.deadline && t.deadline < today);
+                const stuck = openTasks.filter((t) => !!t.blocked);
+                const next = (now.data?.ordered ?? []).find((t) => t.outcome_id === o.id);
+                return (
+                  <article className="outcome-card" key={o.id}>
+                    <div className="outcome-card-top">
+                      <div><span className={`confidence confidence-${o.confidence}`}>{o.confidence} confidence</span><h3>{o.title}</h3></div>
+                      <span className={o.target_date && o.target_date < today ? "date-chip is-danger" : "date-chip"}>{o.target_date ? `Target ${o.target_date}` : "No target date"}</span>
+                    </div>
+                    {o.description && <p>{o.description}</p>}
+                    <div className="outcome-facts">
+                      <span><strong>{openTasks.length}</strong> open actions</span>
+                      <span><strong>{doneTasks.length}</strong> completed</span>
+                      <span><strong>{outcomeBets.length}</strong> tracked bets</span>
+                    </div>
+                    {(slipped.length > 0 || stuck.length > 0 || outcomeBets.some((b) => b.status === "refuted")) && (
+                      <div className="drift-tags">
+                        {slipped.length > 0 && <span>{slipped.length} overdue</span>}
+                        {stuck.length > 0 && <span>{stuck.length} blocked</span>}
+                        {outcomeBets.some((b) => b.status === "refuted") && <span>assumption refuted</span>}
+                      </div>
+                    )}
+                    <div className="outcome-next"><span>Next move</span><strong>{next?.title ?? "No action connected"}</strong></div>
+                  </article>
+                );
+              })}
+              {activeOutcomes.length === 0 && <div className="empty-state"><strong>No active outcomes.</strong><span>Define the result you are trying to create in Direction, then anchor work to it.</span></div>}
+            </div>
+          </section>
+        </div>
+
+        <aside className="command-aside" aria-label="Drift and incoming signals">
+          <section className="panel attention-panel">
+            <div className="panel-heading">
+              <div><p className="eyebrow danger-text">Exceptions</p><h2>Drift radar</h2></div>
+              <span className={driftCount ? "alert-count" : "clear-count"}>{driftCount}</span>
+            </div>
+            <div className="radar-sections">
+              {(now.data?.overdue ?? []).length > 0 && <div className="radar-group"><h3>Went sideways</h3>{(now.data?.overdue ?? []).slice(0, 4).map((t) => <div className="radar-item danger" key={`late-${t.id}`}><span>Overdue</span><strong>{t.title}</strong><small>{outcomeName(t.outcome_id) ?? "No outcome"} · {t.deadline}</small></div>)}</div>}
+              {(now.data?.blocked ?? []).length > 0 && <div className="radar-group"><h3>Stuck</h3>{(now.data?.blocked ?? []).slice(0, 4).map((t) => <div className="radar-item warning" key={`blocked-${t.id}`}><span>Blocked</span><strong>{t.title}</strong><small>{outcomeName(t.outcome_id) ?? "No outcome"}</small></div>)}</div>}
+              {(reviewDueBets.length > 0 || refutedBets.length > 0 || atRiskOutcomes.length > 0) && <div className="radar-group"><h3>Strategy at risk</h3>{refutedBets.slice(0, 3).map((b) => <div className="radar-item danger" key={`refuted-${b.id}`}><span>Refuted bet</span><strong>{b.title}</strong><small>{outcomeName(b.outcome_id) ?? "Unlinked"}</small></div>)}{reviewDueBets.slice(0, 3).map((b) => <div className="radar-item warning" key={`review-${b.id}`}><span>Review due</span><strong>{b.title}</strong><small>{b.review_date}</small></div>)}{atRiskOutcomes.slice(0, 3).map((o) => <div className="radar-item warning" key={`risk-${o.id}`}><span>Outcome risk</span><strong>{o.title}</strong><small>{o.target_date && o.target_date < today ? `Target passed ${o.target_date}` : "Low confidence"}</small></div>)}</div>}
+              {unlinkedTasks.length > 0 && <div className="radar-group"><h3>Losing alignment</h3>{unlinkedTasks.slice(0, 4).map((t) => <div className="radar-item neutral" key={`unlinked-${t.id}`}><span>Unlinked action</span><strong>{t.title}</strong><small>Connect it to an outcome or drop it.</small></div>)}</div>}
+              {driftCount === 0 && <div className="clear-state"><span className="clear-mark" aria-hidden="true">✓</span><strong>No drift detected</strong><p>No overdue, blocked, unlinked, or strategically at-risk work.</p></div>}
+            </div>
+          </section>
+
+          <section className="panel horizon-panel">
+            <div className="panel-heading"><div><p className="eyebrow">Next 14 days</p><h2>On the horizon</h2></div></div>
+            <ul className="timeline-list">
+              {upcomingTasks.map((t) => <li key={`up-${t.id}`}><time>{t.deadline}</time><div><strong>{t.title}</strong><span>{outcomeName(t.outcome_id) ?? "No outcome"}</span></div></li>)}
+              {upcomingReviews.map((b) => <li key={`up-bet-${b.id}`}><time>{b.review_date}</time><div><strong>Review: {b.title}</strong><span>Assumption checkpoint</span></div></li>)}
+              {upcomingOutcomes.map((o) => <li key={`up-outcome-${o.id}`}><time>{o.target_date}</time><div><strong>{o.title}</strong><span>Outcome target</span></div></li>)}
+              {upcomingTasks.length + upcomingReviews.length + upcomingOutcomes.length === 0 && <li className="quiet-state">No deadlines or reviews approaching.</li>}
+            </ul>
+          </section>
+
+          <section className="panel reality-panel">
+            <div className="panel-heading"><div><p className="eyebrow">Evidence</p><h2>Reality feed</h2></div><span className="panel-count">{signals.data?.length ?? 0}</span></div>
+            <ul className="signal-list">
+              {(signals.data ?? []).slice(0, 4).map((s) => <li key={s.id}><span className="signal-kind">{s.kind}</span><strong>{s.title}</strong><p>{s.evidence || "No evidence recorded."}</p></li>)}
+              {!signals.loading && (signals.data ?? []).length === 0 && <li className="quiet-state">No signals captured yet. Record what reality is telling you in Review.</li>}
+            </ul>
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

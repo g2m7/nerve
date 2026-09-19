@@ -50,5 +50,5 @@ a strict proposal schema. Stale revisions reject the whole transaction; founder 
 - `src/db.ts` — migrations; `src/repos.ts` — repositories; `src/validate.ts` — trust-boundary validation
 - `src/prioritize.ts` — deterministic Now ordering; `src/context.ts` — context compiler + cache keys
 - `src/proposals.ts` — transactional accept/reject; `src/agents/` — adapters + job runner
-- `web/` — React UI (Direction / Now / Review / Agents); `tests/` — focused unit tests
+- `web/` — React UI (Focus / Direction / Review / System); `tests/` — focused unit tests
 - `product.md`, `agents.md` — concise specs for what is actually built
