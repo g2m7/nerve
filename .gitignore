@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+nerve.db*
+.DS_Store
+.env
+tmp/
+jobdir-*/
