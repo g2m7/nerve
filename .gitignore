@@ -7,5 +7,17 @@ dist/
 nerve.db*
 .DS_Store
 .env
+.env*.local
 tmp/
 jobdir-*/
+
+# Next.js
+.next/
+out/
+
+# Embedded Postgres / PGlite local database
+nerve-pgdata/
+
+# TypeScript & tooling build caches
+*.tsbuildinfo
+next-env.d.ts.bak

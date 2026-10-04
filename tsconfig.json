@@ -1,19 +1,58 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx",
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
     "skipLibCheck": true,
-    "types": ["bun-types"],
-    "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] }
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "types": [
+      "bun-types"
+    ],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
   },
-  "include": ["src/**/*", "web/**/*", "tests/**/*", "vite.config.ts"]
+  "include": [
+    "next-env.d.ts",
+    "src/app/**/*",
+    "src/components/**/*",
+    "src/lib/**/*",
+    "src/bridge/**/*",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "web",
+    "tests",
+    "dist",
+    "src/server.ts",
+    "src/dev.ts",
+    "src/db.ts",
+    "src/repos.ts",
+    "src/prioritize.ts",
+    "src/context.ts",
+    "src/validate.ts",
+    "src/proposals.ts"
+  ]
 }
